@@ -6,7 +6,7 @@ import numpy as np
 from random import shuffle
 import visualizer
 import signal
-
+import ipaddress
 
 
 class engine():
@@ -17,10 +17,10 @@ class engine():
 		self.fps = 2
 		self.numLED = 600
 		self.animations=[self.animation1]
-		self.tableStartTime = datetime.timedelta(0,40) #day, seconds
+		self.tableStartTime = datetime.timedelta(0,52860) #day, seconds
 		# Comment serial port out if not connected to Arduino
 		self.serialPort1 = serial.Serial('/dev/cu.usbserial-DN02B86I', 250000)
-		# self.serialPort2 = serial.Serial('/dev/cu.usbmodem1411', 250000)
+		self.serialPort2 = serial.Serial('/dev/cu.usbmodem14111', 250000)
 		# self.serialPort3 = serial.Serial('/dev/cu.usbserial-DA01R2KF', 250000)
 		
 
@@ -38,6 +38,9 @@ class engine():
 		self.timer = 0
 		#visualizer for debug purposes
 		self.v = visualizer.visualizer()
+		self.bogon_filter_raw = ["0.0.0.0/8","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8","169.254.0.0/16","172.16.0.0/12","192.0.0.0/24",\
+								"192.0.2.0/24","192.168.0.0/16","198.18.0.0/15","198.51.100.0/24","203.0.113.0/24","224.0.0.0/3"]
+		self.bogon_filter = []
 
 		self.set_up_step(filename)
 		self.init_run()
@@ -47,6 +50,8 @@ class engine():
 		#set up related goes here
 		time.sleep(5)	#wait for setup in Arduino
 		self.table = self.read_table(filename)
+		for f in self.bogon_filter_raw:
+			self.bogon_filter.append(ipaddress.ip_network(f))
 		self.currentTime = self.tableStartTime
 
 	def init_run(self):
@@ -104,6 +109,8 @@ class engine():
 		startTime = self.currentTime
 		self.currentTime += datetime.timedelta(seconds=self.timeUnit)
 		endTime = self.currentTime
+		if(self.currentTime > self.tableEndTime):
+			self.currentTime = self.tableStartTime
 		return self.table[(self.table["time"]>= startTime) & (self.table["time"] < endTime)]
 
 	def draw_frames(self):
@@ -130,7 +137,7 @@ class engine():
 	def write_to_serial(self,frame):
 		#middle-ware
 		self.serialPort1.write(frame[:600].encode("latin-1"))
-		# self.serialPort2.write(frame[600:1200].encode("latin-1"))
+		self.serialPort2.write(frame[600:1200].encode("latin-1"))
 		# self.serialPort3.write(frame[1200:].encode("latin-1"))
 		# pass
 		
@@ -143,6 +150,10 @@ class engine():
 		# self.write_to_serial("".join(st))
 		# time.sleep(1)
 			
+	def is_subnet_of(self,a,b):
+		if a._version != b._version: return False
+		return (b.network_address <= a.network_address and b.broadcast_address >= a.broadcast_address)
+
 
 	#control 0 - 255. 
 	#Visualization no.2
@@ -154,32 +165,49 @@ class engine():
 		#change later
 		needUpdate = [1]*self.numLED
 		# for x,led in self.ASmap.items():
-
+		# print(len(ASlist))
 		for x in ASlist:
 			led = self.ASmap[x]
 			# if x in ASlist:
-			self.frames[0][2*led] = 0	#blink
-			self.frames[1][2*led] = 64
 			needUpdate[led] = 0
-			#check if this is annouce
-			test = data[(data["AS"]==x) & (data["action"] == "A")]
-			if not test.empty:
-				if ":" not in test["content"].iloc[-1]:
-					self.frames[1][2*led+1] = int(test["content"].iloc[-1].split('.')[0])
+			#check for bogon
+			bogon_check = data[data["AS"]== x]["content"].unique().tolist()
+			for check in bogon_check:
+				a = ipaddress.ip_network(str(check))
+				for f in self.bogon_filter:
+					if self.is_subnet_of(a,f):
+						self.frames[0][2*led] = 202
+						self.frames[1][2*led] = 201
+						# print("bogon detected")
+
+			# if there is bogus, need to give flash alert
+			if(self.frames[0][2*led] > 195 and self.frames[0][2*led] <= 202):
+				self.frames[0][2*led] -= 2
+				self.frames[1][2*led] -= 2
+			else:
+				# if not announce, just blink to show update
+				self.frames[0][2*led] = 0	#blink
+				self.frames[1][2*led] = 64
+				test = data[(data["AS"]==x) & (data["action"] == "A")]
+				test = test[~test["content"].str.contains(":")]
+				if not test.empty:
+					most_updated_addr = test["content"].value_counts().head(1).index.get_values()[0]
+					self.frames[1][2*led+1] = int(most_updated_addr.split('.')[0])
 					self.frames[0][2*led+1] = self.frames[1][2*led+1]
 						
 			# else:
 		for led in range(self.numLED):
 			if needUpdate[led] == 1:
-				self.frames[0][2*led] = self.frames[1][2*led] -1 if self.frames[1][2*led] >=36 else 32
+				self.frames[0][2*led] = self.frames[1][2*led]
 				self.frames[0][2*led+1] = self.frames[1][2*led+1]
-				self.frames[1][2*led] = self.frames[0][2*led] -1 if self.frames[0][2*led] >=36 else 32
+				self.frames[1][2*led] = self.frames[0][2*led] -1 if self.frames[0][2*led] >32 else 32
 
 
 
 
 def main():
-	e = engine("output.txt")
+	inputname = "data_1215.txt"
+	e = engine(inputname)
 	def signal_handler(sig, frame):
 		e.onExit()
 		quit()

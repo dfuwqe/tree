@@ -44,9 +44,11 @@ void loop()
 
 void FillLEDsFromPaletteColors( char* colorCommands)
 {
+//    int beffect;
     char t1, t2;
     int c1,c2;
     for( int i = 0; i < NUM_LEDS; i++) {
+//       beffect = random(-2,2);
        t1 = colorCommands[2*i];
        t2 = colorCommands[2*i+1];
        c1 = (int) t1;
@@ -54,12 +56,17 @@ void FillLEDsFromPaletteColors( char* colorCommands)
       if(c1 == 0 ||c1 == 99|| c1 == 255){
         leds[i] = CRGB::Black;
       }
+      else if(c1 <= 200 && c1 >= 193){
+        if(c1%2 == 0)
+          leds[i] = CRGB::Red;
+          leds[i] = CRGB::Blue; 
+      }
       else if(c1 <= 32){
         leds[i] = CRGB::Azure;
-        leds[i].fadeToBlackBy(250);
+        leds[i].fadeToBlackBy(253);
       }
       else{
-        leds[i] = ColorFromPalette( currentPalette, c2,192,LINEARBLEND);
+        leds[i] = ColorFromPalette( currentPalette, c2,200,LINEARBLEND);
         fadeTowardColor(leds[i], CRGB::Azure, 8*(64-c1)); //color gradient
       }
     }
